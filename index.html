@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>ClassTube</title>
-  <style>
+<meta charset="UTF-8">
+<title>ClassTube Global</title>
+<style>
 body {
   font-family: Comic sans MS;
   background: #f4f4f4;
@@ -16,30 +16,26 @@ video {
   margin-bottom: 10px;
 }
 
-#feed div {
-  background: white;
-  padding: 10px;
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
+.card{
+  background:white;
+  padding:10px;
+  margin-bottom:10px;
+  border-radius:8px;
+  width:320px;
 }
 
-#feed img {
-  margin-right: 10px;
-  border-radius: 50%;
+#feed{
+  display:flex;
+  flex-wrap:wrap;
+  gap:16px;
 }
-[ VIDEO PLAYER ]
-
-Video Title
-● ChannelName
-[
-    "#AA47BD","#7B1FA2","#77919D","#455A65", "#EC417A","#C1175C","#5D6AC0","#0388D2","#00579B","#0098A7","#00897B","#004D40","#68A039","#34691E","#8C6E63","#5D4138","#7D57C1","#512DA7","#EF6C00","#F6511E","#BE360B",];
-  </style>
+</style>
 </head>
 <body>
+
 <div id="loginBox">
   <h2>Login / Signup</h2>
-  <input type="text" id="username" placeholder="Username"><br>
+  <input type="email" id="email" placeholder="Email"><br>
   <input type="password" id="password" placeholder="Password"><br>
   <button id="signupBtn">Sign Up</button>
   <button id="loginBtn">Login</button>
@@ -55,7 +51,7 @@ Video Title
   <button id="deleteAccountBtn">Delete Account</button>
   
   <h2>Feed</h2>
-  <div id="feed" style="display:flex; flex-wrap:wrap; gap:16px;"></div>
+  <div id="feed"></div>
 </div>
 
 <div id="profilePage" style="display:none;">
@@ -65,14 +61,33 @@ Video Title
   <div id="profileVideos" style="display:flex; flex-wrap:wrap; gap:16px; margin-top:8px;"></div>
 </div>
 
-  <script>
-// -------------------- HELPERS --------------------
+<script type="module">
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, where, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCwhP5QcFIHEVXTDrBTTIHm-JH-viW8FEs",
+  authDomain: "class-tube-net.firebaseapp.com",
+  projectId: "class-tube-net",
+  storageBucket: "class-tube-net.firebasestorage.app",
+  messagingSenderId: "556946076935",
+  appId: "1:556946076935:web:420780aad295249f3801a2"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let currentUser = null;
+
 const $ = id => document.getElementById(id);
 
-function getDefaultAvatar(username, size = 48) {
-  const colors = [
-    "#AA47BD","#7B1FA2","#77919D","#455A65", "#EC417A","#C1175C","#5D6AC0","#0388D2","#00579B","#0098A7","#00897B","#004D40","#68A039","#34691E","#8C6E63","#5D4138","#7D57C1","#512DA7","#EF6C00","#F6511E","#BE360B",""];
-  const color = colors[username.charCodeAt(0) % colors.length];
+/* -------------------- HELPERS -------------------- */
+function getDefaultAvatar(email, size=48){
+  const colors = ["#AA47BD","#7B1FA2","#77919D","#455A65","#EC417A","#C1175C","#5D6AC0","#0388D2","#00579B","#0098A7","#00897B","#004D40","#68A039","#34691E","#8C6E63","#5D4138","#7D57C1","#512DA7","#EF6C00","#F6511E","#BE360B",""];
+  const color = colors[email.charCodeAt(0) % colors.length];
   const c = document.createElement("canvas");
   c.width = c.height = size;
   const ctx = c.getContext("2d");
@@ -80,16 +95,16 @@ function getDefaultAvatar(username, size = 48) {
   ctx.beginPath();
   ctx.arc(size/2,size/2,size/2,0,Math.PI*2);
   ctx.fill();
-  ctx.fillStyle = "white";
-  ctx.font = `${size/2}px Arial`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(username[0] || "?", size/2, size/2);
+  ctx.fillStyle="white";
+  ctx.font=`${size/2}px Arial`;
+  ctx.textAlign="center";
+  ctx.textBaseline="middle";
+  ctx.fillText(email[0]||"?", size/2,size/2);
   return c.toDataURL();
 }
 
-function timeAgo(t) {
-  const s = Math.floor((Date.now() - t)/1000);
+function timeAgo(t){
+  const s=Math.floor((Date.now()-t)/1000);
   if(s<60) return `${s}s ago`;
   const m=Math.floor(s/60); if(m<60) return `${m}m ago`;
   const h=Math.floor(m/60); if(h<24) return `${h}h ago`;
@@ -98,252 +113,162 @@ function timeAgo(t) {
   return `${Math.floor(mo/12)}y ago`;
 }
 
-// -------------------- STORAGE --------------------
-let users = JSON.parse(localStorage.getItem("users")||"{}");
-let videos = JSON.parse(localStorage.getItem("videos")||"[]");
-let currentUser = null;
-
-function saveUsers(){ localStorage.setItem("users", JSON.stringify(users)); }
-function saveVideos(){ localStorage.setItem("videos", JSON.stringify(videos)); }
-
-// -------------------- AUTH --------------------
-window.signup = function(){
-  const username = $("username").value.trim();
-  const password = $("password").value.trim();
-  if(!username||!password) return alert("Fill everything");
-  if(users[username]) return alert("Username exists");
-  users[username]={password,joined:Date.now()};
-  saveUsers();
-  currentUser=username;
-  startApp();
+/* -------------------- AUTH -------------------- */
+signupBtn.onclick = ()=>{
+  createUserWithEmailAndPassword(auth,email.value,password.value)
+  .catch(e=>alert(e.message));
 };
-
-window.login = function(){
-  const username=$("username").value.trim();
-  const password=$("password").value.trim();
-  if(!username||!password) return alert("Fill everything");
-  if(!users[username]) return alert("Username does not exist");
-  if(users[username].password!==password) return alert("Wrong password");
-  currentUser=username;
-  startApp();
+loginBtn.onclick = ()=>{
+  signInWithEmailAndPassword(auth,email.value,password.value)
+  .catch(e=>alert(e.message));
 };
+logoutBtn.onclick = ()=>signOut(auth);
 
-window.logout=function(){ 
-  currentUser=null; 
-  $("app").style.display="none"; 
-  $("loginBox").style.display="block"; 
-};
+/* -------------------- ON LOGIN -------------------- */
+onAuthStateChanged(auth,user=>{
+  if(user){
+    currentUser=user;
+    loginBox.style.display="none";
+    app.style.display="block";
+    status.innerHTML=`<img src="${getDefaultAvatar(currentUser.email)}" style="width:32px;border-radius:50%;vertical-align:middle;"> Logged in as <b>${currentUser.email}</b>`;
+    loadFeed();
+  }else{
+    app.style.display="none";
+    loginBox.style.display="block";
+  }
+});
 
-// -------------------- START APP --------------------
-function startApp(){
-  $("loginBox").style.display="none";
-  $("app").style.display="block";
-  $("status").innerHTML=`<img src="${getDefaultAvatar(currentUser)}" style="border-radius:50%; width:32px; vertical-align:middle;"> Logged in as <b>${currentUser}</b>`;
-  renderFeed();
-}
-
-// -------------------- VIDEO UPLOAD --------------------
-window.uploadVideo=function(){
-  const file=$("videoFile").files[0];
-  const title=$("videoTitle").value||"Untitled";
+/* -------------------- UPLOAD VIDEO -------------------- */
+uploadBtn.onclick=()=>{
+  const file = videoFile.files[0];
+  const title = videoTitle.value||"Untitled";
   if(!file) return alert("Choose a video");
-  const reader=new FileReader();
-  reader.onload=function(e){
-    videos.unshift({
-      id:Date.now(),
-      user:currentUser,
+
+  const reader = new FileReader();
+  reader.onload = async e=>{
+    await addDoc(collection(db,"videos"),{
+      user: currentUser.email,
       title,
-      url:e.target.result,
-      likes:[],
-      comments:[],
-      timestamp:Date.now()
+      data: e.target.result,
+      timestamp: Date.now(),
+      likes: [],
+      comments: []
     });
-    saveVideos();
-    renderFeed();
+    videoFile.value=""; videoTitle.value="";
   };
   reader.readAsDataURL(file);
 };
 
-// -------------------- FEED --------------------
-function renderFeed(){
-  const feedEl=$("feed");
-  feedEl.innerHTML="";
+/* -------------------- FEED -------------------- */
+function loadFeed(){
+  const q = query(collection(db,"videos"), orderBy("timestamp","desc"));
+  onSnapshot(q,snap=>{
+    const feedEl=$("feed");
+    feedEl.innerHTML="";
+    snap.forEach(doc=>{
+      const v=doc.data();
+      const card=document.createElement("div");
+      card.className="card";
 
-  // Sort videos newest first
-  const sortedVideos = videos.sort((a,b)=>b.timestamp - a.timestamp);
-
-  sortedVideos.forEach(v=>{
-    const card=document.createElement("div");
-    card.style.width="320px";
-    card.style.border="1px solid #ccc";
-    card.style.borderRadius="8px";
-    card.style.padding="8px";
-    card.style.display="flex";
-    card.style.flexDirection="column";
-
-    // Video element
-    const videoEl = document.createElement("video");
-    videoEl.src=v.url;
-    videoEl.controls=true;
-    videoEl.width=320;
-    videoEl.style.borderRadius="4px";
-
-    // Title
-    const titleEl = document.createElement("h4");
-    titleEl.style.margin="4px 0";
-    titleEl.innerText=v.title;
-
-    // Channel info
-    const infoDiv = document.createElement("div");
-    infoDiv.style.display="flex";
-    infoDiv.style.alignItems="center";
-    infoDiv.style.marginBottom="4px";
-
-    const avatar = document.createElement("img");
-    avatar.src=getDefaultAvatar(v.user,32);
-    avatar.style.borderRadius="50%";
-    avatar.style.width="32px";
-    avatar.style.marginRight="8px";
-
-    const textDiv = document.createElement("div");
-    const channelName=document.createElement("div");
-    channelName.style.fontWeight="bold";
-    channelName.style.cursor="pointer";
-    channelName.style.color="#065fd4";
-    channelName.innerText=v.user;
-    channelName.onclick = ()=>viewProfile(v.user);
-
-    const timestamp=document.createElement("div");
-    timestamp.style.fontSize="12px";
-    timestamp.style.color="#555";
-    timestamp.innerText = timeAgo(v.timestamp);
-
-    textDiv.appendChild(channelName);
-    textDiv.appendChild(timestamp);
-    infoDiv.appendChild(avatar);
-    infoDiv.appendChild(textDiv);
-
-    // Buttons
-    const likeBtn = document.createElement("button");
-    likeBtn.innerText = `👍 ${v.likes.length}`;
-    likeBtn.onclick = ()=>toggleLike(v.id);
-
-    const commentBtn = document.createElement("button");
-    commentBtn.id = `toggleBtn-${v.id}`;
-    commentBtn.innerText = `View comments (${v.comments.length})`;
-    commentBtn.onclick = ()=>toggleComments(v.id);
-
-    // Comments box
-    const commentsBox = document.createElement("div");
-    commentsBox.id = `comments-${v.id}`;
-    commentsBox.style.display="none";
-    commentsBox.style.marginTop="4px";
-    commentsBox.style.fontSize="14px";
-
-    const commentInput = document.createElement("input");
-    commentInput.type="text";
-    commentInput.placeholder="Add comment";
-
-    const postBtn=document.createElement("button");
-    postBtn.innerText="Post";
-    postBtn.onclick = function() {
-      addComment(v.id, commentInput.value);
-      commentInput.value = "";
-    };
-
-    commentsBox.appendChild(commentInput);
-    commentsBox.appendChild(postBtn);
-
-    // Assemble card
-    card.appendChild(videoEl);
-    card.appendChild(titleEl);
-    card.appendChild(infoDiv);
-    card.appendChild(likeBtn);
-    card.appendChild(commentBtn);
-    card.appendChild(commentsBox);
-
-    feedEl.appendChild(card);
+      card.innerHTML=`
+        <video controls src="${v.data}"></video>
+        <h4>${v.title}</h4>
+        <div>
+          <img src="${getDefaultAvatar(v.user,32)}" style="width:32px;border-radius:50%;margin-right:5px;">
+          <b style="cursor:pointer;color:#065fd4;" onclick="viewProfile('${v.user}')">${v.user}</b>
+          <span style="font-size:12px;color:#555;margin-left:5px;">${timeAgo(v.timestamp)}</span>
+        </div>
+        <button onclick="toggleLike('${doc.id}')">👍 ${v.likes.length}</button>
+        <button id="toggleBtn-${doc.id}" onclick="toggleComments('${doc.id}')">View comments (${v.comments.length})</button>
+        <div id="comments-${doc.id}" style="display:none;margin-top:4px;font-size:14px;"></div>
+      `;
+      feedEl.appendChild(card);
+      renderComments(doc.id);
+    });
   });
 }
 
-// -------------------- COMMENTS --------------------
-window.addComment=function(id,text){
-  if(!text) return;
-  const v=videos.find(v=>v.id===id);
-  v.comments.push({user:currentUser,text,timestamp:Date.now()});
-  saveVideos(); renderFeed();
-};
+/* -------------------- COMMENTS -------------------- */
+async function renderComments(videoId){
+  const docRef = doc(db,"videos",videoId);
+  onSnapshot(docRef,docSnap=>{
+    const v = docSnap.data();
+    const box = $("comments-"+videoId);
+    if(!box) return;
+    box.innerHTML="";
 
-window.toggleComments=function(id){
-  const box=$("comments-"+id);
-  const btn=$("toggleBtn-"+id);
-  const v=videos.find(v=>v.id===id);
-  if(box.style.display==="none"){
-    box.style.display="block";
-    // Render existing comments
-    box.innerHTML = "";
     const commentInput = document.createElement("input");
     commentInput.type="text";
     commentInput.placeholder="Add comment";
+
     const postBtn = document.createElement("button");
     postBtn.innerText="Post";
-    postBtn.onclick = function(){
-      addComment(v.id, commentInput.value);
-      commentInput.value = "";
+    postBtn.onclick=async()=>{
+      await addDoc(collection(db,"comments"),{
+        videoId,
+        user: currentUser.email,
+        text: commentInput.value,
+        timestamp: Date.now()
+      });
+      commentInput.value="";
     };
+
     box.appendChild(commentInput);
     box.appendChild(postBtn);
 
-    v.comments.forEach(c=>{
-      const cDiv = document.createElement("div");
-      cDiv.innerHTML = `<b style="cursor:pointer; color:#065fd4;" onclick="viewProfile('${c.user}')">${c.user}</b>: ${c.text}`;
-      box.appendChild(cDiv);
+    // display comments
+    const q = query(collection(db,"comments"), where("videoId","==",videoId));
+    onSnapshot(q,snap=>{
+      snap.forEach(c=>{
+        const d=c.data();
+        const cDiv = document.createElement("div");
+        cDiv.innerHTML = `<b style="cursor:pointer;color:#065fd4;" onclick="viewProfile('${d.user}')">${d.user}</b>: ${d.text}`;
+        box.appendChild(cDiv);
+      });
     });
+  });
+}
 
-    btn.innerText="Close comments";
-  } else {
-    box.style.display="none";
-    btn.innerText=`View comments (${v.comments.length})`;
-  }
+/* -------------------- TOGGLE COMMENTS -------------------- */
+window.toggleComments = (id)=>{
+  const box = $("comments-"+id);
+  const btn = $("toggleBtn-"+id);
+  if(box.style.display==="none"){ box.style.display="block"; btn.innerText="Close comments"; }
+  else { box.style.display="none"; btn.innerText="View comments"; }
 };
 
-// -------------------- PROFILE --------------------
-window.viewProfile=function(user){
+/* -------------------- LIKE -------------------- */
+window.toggleLike = async(id)=>{
+  const docRef = doc(db,"videos",id);
+  const snap = await docRef.get();
+};
+
+/* -------------------- PROFILE -------------------- */
+window.viewProfile=(user)=>{
   $("feed").style.display="none";
   $("profilePage").style.display="block";
   $("profileTitle").innerText=user+"'s Channel";
   $("profileAvatar").src=getDefaultAvatar(user,64);
-  $("profileVideos").innerHTML="";
-  videos.filter(v=>v.user===user).forEach(v=>{
-    const vid=document.createElement("video");
-    vid.src=v.url; vid.controls=true; vid.width=320;
-    $("profileVideos").appendChild(vid);
-  });
 };
 
-window.closeProfile=function(){
+/* -------------------- BUTTONS -------------------- */
+myChannelBtn.onclick=()=>viewProfile(currentUser.email);
+
+backBtn.onclick=()=>{
   $("profilePage").style.display="none";
   $("feed").style.display="block";
 };
 
-// -------------------- DELETE ACCOUNT --------------------
-window.deleteAccount=function(){
+deleteAccountBtn.onclick=async()=>{
   if(!confirm("Delete account permanently?")) return;
-  videos=videos.filter(v=>v.user!==currentUser);
-  delete users[currentUser];
-  saveVideos(); saveUsers(); logout();
+  const q = query(collection(db,"videos"), where("user","==",currentUser.email));
+  onSnapshot(q,snap=>{
+    snap.forEach(doc=>deleteDoc(doc.ref));
+  });
+  await auth.currentUser.delete();
+  signOut(auth);
 };
 
-// -------------------- BUTTONS --------------------
-$("signupBtn").onclick=signup;
-$("loginBtn").onclick=login;
-$("logoutBtn").onclick=logout;
-$("uploadBtn").onclick=uploadVideo;
-$("myChannelBtn").onclick=()=>viewProfile(currentUser);
-$("backBtn").onclick=closeProfile;
-$("deleteAccountBtn").onclick=deleteAccount;
-
-  </script>
+</script>
 </body>
 </html>
-
