@@ -271,4 +271,242 @@ deleteAccountBtn.onclick=async()=>{
 
 </script>
 </body>
+</html>  <h2>Login / Signup</h2>
+  <input type="email" id="email" placeholder="Email"><br>
+  <input type="password" id="password" placeholder="Password"><br>
+  <button id="signupBtn">Sign Up</button>
+  <button id="loginBtn">Login</button>
+</div>
+
+<div id="app" style="display:none;">
+  <div id="status"></div>
+  <input type="file" id="videoFile">
+  <input type="text" id="videoTitle" placeholder="Video title">
+  <button id="uploadBtn">Upload Video</button>
+  <button id="logoutBtn">Logout</button>
+  <button id="myChannelBtn">My Channel</button>
+  <button id="deleteAccountBtn">Delete Account</button>
+  
+  <h2>Feed</h2>
+  <div id="feed"></div>
+</div>
+
+<div id="profilePage" style="display:none;">
+  <h2 id="profileTitle"></h2>
+  <img id="profileAvatar" style="border-radius:50%; width:64px;">
+  <button id="backBtn">Back to Feed</button>
+  <div id="profileVideos" style="display:flex; flex-wrap:wrap; gap:16px; margin-top:8px;"></div>
+</div>
+
+<script type="module">
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, where, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCwhP5QcFIHEVXTDrBTTIHm-JH-viW8FEs",
+  authDomain: "class-tube-net.firebaseapp.com",
+  projectId: "class-tube-net",
+  storageBucket: "class-tube-net.firebasestorage.app",
+  messagingSenderId: "556946076935",
+  appId: "1:556946076935:web:420780aad295249f3801a2"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let currentUser = null;
+
+const $ = id => document.getElementById(id);
+
+/* -------------------- HELPERS -------------------- */
+function getDefaultAvatar(email, size=48){
+  const colors = ["#AA47BD","#7B1FA2","#77919D","#455A65","#EC417A","#C1175C","#5D6AC0","#0388D2","#00579B","#0098A7","#00897B","#004D40","#68A039","#34691E","#8C6E63","#5D4138","#7D57C1","#512DA7","#EF6C00","#F6511E","#BE360B",""];
+  const color = colors[email.charCodeAt(0) % colors.length];
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(size/2,size/2,size/2,0,Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle="white";
+  ctx.font=`${size/2}px Arial`;
+  ctx.textAlign="center";
+  ctx.textBaseline="middle";
+  ctx.fillText(email[0]||"?", size/2,size/2);
+  return c.toDataURL();
+}
+
+function timeAgo(t){
+  const s=Math.floor((Date.now()-t)/1000);
+  if(s<60) return `${s}s ago`;
+  const m=Math.floor(s/60); if(m<60) return `${m}m ago`;
+  const h=Math.floor(m/60); if(h<24) return `${h}h ago`;
+  const d=Math.floor(h/24); if(d<30) return `${d}d ago`;
+  const mo=Math.floor(d/30); if(mo<12) return `${mo}mo ago`;
+  return `${Math.floor(mo/12)}y ago`;
+}
+
+/* -------------------- AUTH -------------------- */
+signupBtn.onclick = ()=>{
+  createUserWithEmailAndPassword(auth,email.value,password.value)
+  .catch(e=>alert(e.message));
+};
+loginBtn.onclick = ()=>{
+  signInWithEmailAndPassword(auth,email.value,password.value)
+  .catch(e=>alert(e.message));
+};
+logoutBtn.onclick = ()=>signOut(auth);
+
+/* -------------------- ON LOGIN -------------------- */
+onAuthStateChanged(auth,user=>{
+  if(user){
+    currentUser=user;
+    loginBox.style.display="none";
+    app.style.display="block";
+    status.innerHTML=`<img src="${getDefaultAvatar(currentUser.email)}" style="width:32px;border-radius:50%;vertical-align:middle;"> Logged in as <b>${currentUser.email}</b>`;
+    loadFeed();
+  }else{
+    app.style.display="none";
+    loginBox.style.display="block";
+  }
+});
+
+/* -------------------- UPLOAD VIDEO -------------------- */
+uploadBtn.onclick=()=>{
+  const file = videoFile.files[0];
+  const title = videoTitle.value||"Untitled";
+  if(!file) return alert("Choose a video");
+
+  const reader = new FileReader();
+  reader.onload = async e=>{
+    await addDoc(collection(db,"videos"),{
+      user: currentUser.email,
+      title,
+      data: e.target.result,
+      timestamp: Date.now(),
+      likes: [],
+      comments: []
+    });
+    videoFile.value=""; videoTitle.value="";
+  };
+  reader.readAsDataURL(file);
+};
+
+/* -------------------- FEED -------------------- */
+function loadFeed(){
+  const q = query(collection(db,"videos"), orderBy("timestamp","desc"));
+  onSnapshot(q,snap=>{
+    const feedEl=$("feed");
+    feedEl.innerHTML="";
+    snap.forEach(doc=>{
+      const v=doc.data();
+      const card=document.createElement("div");
+      card.className="card";
+
+      card.innerHTML=`
+        <video controls src="${v.data}"></video>
+        <h4>${v.title}</h4>
+        <div>
+          <img src="${getDefaultAvatar(v.user,32)}" style="width:32px;border-radius:50%;margin-right:5px;">
+          <b style="cursor:pointer;color:#065fd4;" onclick="viewProfile('${v.user}')">${v.user}</b>
+          <span style="font-size:12px;color:#555;margin-left:5px;">${timeAgo(v.timestamp)}</span>
+        </div>
+        <button onclick="toggleLike('${doc.id}')">👍 ${v.likes.length}</button>
+        <button id="toggleBtn-${doc.id}" onclick="toggleComments('${doc.id}')">View comments (${v.comments.length})</button>
+        <div id="comments-${doc.id}" style="display:none;margin-top:4px;font-size:14px;"></div>
+      `;
+      feedEl.appendChild(card);
+      renderComments(doc.id);
+    });
+  });
+}
+
+/* -------------------- COMMENTS -------------------- */
+async function renderComments(videoId){
+  const docRef = doc(db,"videos",videoId);
+  onSnapshot(docRef,docSnap=>{
+    const v = docSnap.data();
+    const box = $("comments-"+videoId);
+    if(!box) return;
+    box.innerHTML="";
+
+    const commentInput = document.createElement("input");
+    commentInput.type="text";
+    commentInput.placeholder="Add comment";
+
+    const postBtn = document.createElement("button");
+    postBtn.innerText="Post";
+    postBtn.onclick=async()=>{
+      await addDoc(collection(db,"comments"),{
+        videoId,
+        user: currentUser.email,
+        text: commentInput.value,
+        timestamp: Date.now()
+      });
+      commentInput.value="";
+    };
+
+    box.appendChild(commentInput);
+    box.appendChild(postBtn);
+
+    // display comments
+    const q = query(collection(db,"comments"), where("videoId","==",videoId));
+    onSnapshot(q,snap=>{
+      snap.forEach(c=>{
+        const d=c.data();
+        const cDiv = document.createElement("div");
+        cDiv.innerHTML = `<b style="cursor:pointer;color:#065fd4;" onclick="viewProfile('${d.user}')">${d.user}</b>: ${d.text}`;
+        box.appendChild(cDiv);
+      });
+    });
+  });
+}
+
+/* -------------------- TOGGLE COMMENTS -------------------- */
+window.toggleComments = (id)=>{
+  const box = $("comments-"+id);
+  const btn = $("toggleBtn-"+id);
+  if(box.style.display==="none"){ box.style.display="block"; btn.innerText="Close comments"; }
+  else { box.style.display="none"; btn.innerText="View comments"; }
+};
+
+/* -------------------- LIKE -------------------- */
+window.toggleLike = async(id)=>{
+  const docRef = doc(db,"videos",id);
+  const snap = await docRef.get();
+};
+
+/* -------------------- PROFILE -------------------- */
+window.viewProfile=(user)=>{
+  $("feed").style.display="none";
+  $("profilePage").style.display="block";
+  $("profileTitle").innerText=user+"'s Channel";
+  $("profileAvatar").src=getDefaultAvatar(user,64);
+};
+
+/* -------------------- BUTTONS -------------------- */
+myChannelBtn.onclick=()=>viewProfile(currentUser.email);
+
+backBtn.onclick=()=>{
+  $("profilePage").style.display="none";
+  $("feed").style.display="block";
+};
+
+deleteAccountBtn.onclick=async()=>{
+  if(!confirm("Delete account permanently?")) return;
+  const q = query(collection(db,"videos"), where("user","==",currentUser.email));
+  onSnapshot(q,snap=>{
+    snap.forEach(doc=>deleteDoc(doc.ref));
+  });
+  await auth.currentUser.delete();
+  signOut(auth);
+};
+
+</script>
+</body>
 </html>
+
