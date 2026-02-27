@@ -2,12 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>ClassTube Global Auth</title>
+<title>ClassTube</title>
 <style>
 body{font-family:Comic Sans MS;background:#f4f4f4;padding:20px;}
-video{width:300px;display:block;margin-bottom:10px;}
-.card{background:white;padding:10px;margin-bottom:10px;border-radius:8px;width:320px;}
-#feed{display:flex;flex-wrap:wrap;gap:16px;}
+input,button,textarea{margin:5px 0;padding:5px;width:100%;}
+#feed div, .video-card{background:white;padding:10px;margin-bottom:10px;border-radius:8px;}
+video{width:300px;display:block;margin-bottom:5px;}
+.avatar{width:32px;height:32px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#777;color:white;margin-right:5px;}
+.comment{font-size:14px;border-top:1px solid #eee;padding:2px 0;}
 </style>
 </head>
 <body>
@@ -18,19 +20,19 @@ video{width:300px;display:block;margin-bottom:10px;}
 <input type="password" id="password" placeholder="Password"><br>
 <button id="signupBtn">Sign Up</button>
 <button id="loginBtn">Login</button>
+<p id="loginStatus" style="color:green;"></p>
 </div>
 
 <div id="app" style="display:none;">
 <div id="status"></div>
-<input type="file" id="videoFile">
-<input type="text" id="videoTitle" placeholder="Video title">
-<button id="uploadBtn">Upload Video</button>
+<input type="text" id="videoURL" placeholder="Video URL"><br>
+<input type="text" id="videoTitle" placeholder="Video Title"><br>
+<button id="uploadBtn">Add Video</button>
 <button id="logoutBtn">Logout</button>
 <button id="myChannelBtn">My Channel</button>
-<button id="deleteAccountBtn">Delete Account</button>
 
 <h2>Feed</h2>
-<div id="feed"></div>
+<div id="feed" style="display:flex; flex-wrap:wrap; gap:16px;"></div>
 </div>
 
 <div id="profilePage" style="display:none;">
@@ -41,19 +43,18 @@ video{width:300px;display:block;margin-bottom:10px;}
 </div>
 
 <script type="module">
-
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, deleteUser, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, doc, getDoc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, updateDoc, doc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-/* 🔥 REPLACE WITH YOUR FIREBASE CONFIG */
+/* ===== REPLACE WITH YOUR FIREBASE CONFIG ===== */
 const firebaseConfig = {
-  apiKey: "AIzaSyCwhP5QcFIHEVXTDrBTTIHm-JH-viW8FEs",
-  authDomain: "class-tube-net.firebaseapp.com",
-  projectId: "class-tube-net",
-  storageBucket: "class-tube-net.firebasestorage.app",
-  messagingSenderId: "556946076935",
-  appId: "1:556946076935:web:420780aad295249f3801a2"
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -61,180 +62,178 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 let currentUser = null;
+
+/* ===== HELPERS ===== */
 const $ = id => document.getElementById(id);
-
-/* Helpers */
-function getDefaultAvatar(username,size=48){
-  const colors=["#AA47BD","#7B1FA2","#77919D","#455A65","#EC417A","#C1175C","#5D6AC0","#0388D2","#00579B","#0098A7","#00897B","#004D40","#68A039","#34691E","#8C6E63","#5D4138","#7D57C1","#512DA7","#EF6C00","#F6511E","#BE360B",""];
-  const color=colors[username.charCodeAt(0)%colors.length];
-  const c=document.createElement("canvas"); c.width=c.height=size;
-  const ctx=c.getContext("2d");
-  ctx.fillStyle=color; ctx.beginPath(); ctx.arc(size/2,size/2,size/2,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle="white"; ctx.font=`${size/2}px Arial`; ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText(username[0]||"?",size/2,size/2);
-  return c.toDataURL();
+function getAvatar(username){ 
+  const colors=["#AA47BD","#7B1FA2","#77919D","#455A65","#EC417A","#C1175C","#5D6AC0","#0388D2","#00579B","#0098A7"];
+  const color = colors[username.charCodeAt(0)%colors.length];
+  return `<div class="avatar" style="background:${color}">${username[0].toUpperCase()}</div>`;
 }
-function timeAgo(t){const s=Math.floor((Date.now()-t)/1000); if(s<60)return`${s}s ago`; const m=Math.floor(s/60); if(m<60)return`${m}m ago`; const h=Math.floor(m/60); if(h<24)return`${h}h ago`; const d=Math.floor(h/24); if(d<30)return`${d}d ago`; const mo=Math.floor(d/30); if(mo<12)return`${mo}mo ago`; return`${Math.floor(mo/12)}y ago`;}
 
-/* Sign Up */
-signupBtn.onclick = async ()=>{
-  const username = $("#username").value.trim();
-  const password = $("#password").value.trim();
-  if(!username||!password)return alert("Fill all fields");
-  const fakeEmail = `${username}@classtube.com`;
+/* ===== AUTH HELPERS ===== */
+function fakeEmail(username){ return username+"@classtube.com"; }
+
+/* ===== SIGNUP ===== */
+async function signup(){
+  const username = $("username").value.trim();
+  const password = $("password").value.trim();
+  if(!username||!password){ $("loginStatus").innerText="Fill all fields"; return; }
+  const email = fakeEmail(username);
   try{
-    const cred = await createUserWithEmailAndPassword(auth,fakeEmail,password);
-    startApp(cred.user);
-  }catch(e){ alert(e.message);}
-};
-
-/* Login */
-loginBtn.onclick = async ()=>{
-  const username = $("#username").value.trim();
-  const password = $("#password").value.trim();
-  if(!username||!password)return alert("Fill all fields");
-  const fakeEmail = `${username}@classtube.com`;
-  try{
-    const cred = await signInWithEmailAndPassword(auth,fakeEmail,password);
-    startApp(cred.user);
-  }catch(e){ alert(e.message);}
-};
-
-/* Logout */
-logoutBtn.onclick = ()=>signOut(auth);
-
-/* Auth state */
-onAuthStateChanged(auth,user=>{
-  if(user){
-    currentUser = user;
-    loginBox.style.display="none";
-    app.style.display="block";
-    status.innerHTML=`<img src="${getDefaultAvatar(user.email.split("@")[0])}" style="border-radius:50%; width:32px; vertical-align:middle;"> Logged in as <b>${user.email.split("@")[0]}</b>`;
-    loadFeed();
-  }else{
-    app.style.display="none";
-    loginBox.style.display="block";
+    await createUserWithEmailAndPassword(auth,email,password);
+    $("loginStatus").innerText = "✔ Account created!";
+  }catch(err){
+    $("loginStatus").innerText = err.message;
   }
-});
+}
 
-/* Upload video */
-uploadBtn.onclick=()=>{
-  const file = videoFile.files[0]; if(!file)return alert("Choose video");
-  const title = videoTitle.value || "Untitled";
-  const reader = new FileReader();
-  reader.onload = async e=>{
-    await addDoc(collection(db,"videos"),{
-      user: currentUser.email.split("@")[0],
-      title,
-      data: e.target.result,
-      timestamp: Date.now(),
-      likes: [],
-      comments: []
-    });
-    videoFile.value=""; videoTitle.value="";
-  };
-  reader.readAsDataURL(file);
-};
+/* ===== LOGIN ===== */
+async function login(){
+  const username = $("username").value.trim();
+  const password = $("password").value.trim();
+  if(!username||!password){ $("loginStatus").innerText="Fill all fields"; return; }
+  const email = fakeEmail(username);
+  try{
+    await signInWithEmailAndPassword(auth,email,password);
+    $("loginStatus").innerText = "✔ Logged in!";
+  }catch(err){
+    $("loginStatus").innerText = "Wrong login!";
+  }
+}
 
-/* Load feed */
-function loadFeed(){
-  const q = query(collection(db,"videos"),orderBy("timestamp","desc"));
-  onSnapshot(q,snap=>{
-    feed.innerHTML="";
-    snap.forEach(doc=>{
-      const v = doc.data();
-      const card = document.createElement("div"); card.className="card";
-      card.innerHTML=`
-        <video controls src="${v.data}"></video>
-        <h4>${v.title}</h4>
-        <div>
-          <img src="${getDefaultAvatar(v.user,32)}" style="width:32px;border-radius:50%;margin-right:5px;">
-          <b style="cursor:pointer;color:#065fd4;" onclick="viewProfile('${v.user}')">${v.user}</b>
-          <span style="font-size:12px;color:#555;margin-left:5px;">${timeAgo(v.timestamp)}</span>
-        </div>
-        <button onclick="toggleLike('${doc.id}')">👍 ${v.likes.length}</button>
-        <button id="toggleBtn-${doc.id}" onclick="toggleComments('${doc.id}')">View comments (${v.comments.length})</button>
-        <div id="comments-${doc.id}" style="display:none;margin-top:4px;font-size:14px;"></div>
-      `;
-      feed.appendChild(card);
-      renderComments(doc.id);
-    });
+/* ===== LOGOUT ===== */
+function logout(){ signOut(auth); }
+
+/* ===== ADD VIDEO ===== */
+async function addVideo(){
+  const url = $("videoURL").value.trim();
+  const title = $("videoTitle").value.trim() || "Untitled";
+  if(!url || !currentUser) return alert("Fill URL & login first");
+  await addDoc(collection(db,"videos"),{
+    title,
+    url,
+    user: currentUser,
+    timestamp: new Date(),
+    likes: [],
+    comments: []
+  });
+  $("videoURL").value="";
+  $("videoTitle").value="";
+  loadFeed();
+}
+
+/* ===== LOAD FEED ===== */
+async function loadFeed(){
+  const feedEl = $("feed");
+  feedEl.innerHTML="";
+  const q = query(collection(db,"videos"), orderBy("timestamp","desc"));
+  const snapshot = await getDocs(q);
+  snapshot.forEach(docSnap=>{
+    const v = docSnap.data();
+    const id = docSnap.id;
+    const card = document.createElement("div");
+    card.className="video-card";
+    card.innerHTML = `
+      <video src="${v.url}" controls></video>
+      <div><b>${v.title}</b></div>
+      <div>${getAvatar(v.user)}<span style="cursor:pointer;color:#065fd4;" onclick="viewProfile('${v.user}')">${v.user}</span></div>
+      <button onclick="toggleLike('${id}')">👍 ${v.likes.length}</button>
+      <button id="toggleBtn-${id}" onclick="toggleComments('${id}')">View comments (${v.comments.length})</button>
+      <div id="comments-${id}" style="display:none;margin-top:4px;font-size:14px;"></div>
+    `;
+    feedEl.appendChild(card);
   });
 }
 
-/* Comments */
-async function renderComments(videoId){
-  const box = $("comments-"+videoId); if(!box) return;
-  box.innerHTML="";
-  const commentInput = document.createElement("input"); commentInput.type="text"; commentInput.placeholder="Add comment";
-  const postBtn = document.createElement("button"); postBtn.innerText="Post"; postBtn.onclick = async ()=>{
-    const videoRef = doc(db,"videos",videoId);
-    const snap = await getDoc(videoRef);
-    const v = snap.data();
-    v.comments.push({user:currentUser.email.split("@")[0], text:commentInput.value, timestamp:Date.now()});
-    await setDoc(videoRef,v);
-    commentInput.value="";
-  };
-  box.appendChild(commentInput); box.appendChild(postBtn);
-  const videoRef = doc(db,"videos",videoId);
-  onSnapshot(videoRef,snap=>{
-    const v = snap.data();
-    box.innerHTML=""; box.appendChild(commentInput); box.appendChild(postBtn);
-    v.comments.forEach(c=>{
+/* ===== LIKE ===== */
+async function toggleLike(videoId){
+  const docRef = doc(db,"videos",videoId);
+  const snap = await getDocs(query(collection(db,"videos"),where("__name__","==",videoId)));
+  snap.forEach(async d=>{
+    const data = d.data();
+    const likes = data.likes || [];
+    const idx = likes.indexOf(currentUser);
+    if(idx>-1){ likes.splice(idx,1); } else { likes.push(currentUser); }
+    await updateDoc(d.ref,{likes});
+    loadFeed();
+  });
+}
+
+/* ===== COMMENTS ===== */
+async function toggleComments(videoId){
+  const box = $("comments-"+videoId);
+  const btn = $("toggleBtn-"+videoId);
+  const snap = await getDocs(query(collection(db,"videos"),where("__name__","==",videoId)));
+  const docData = snap.docs[0].data();
+  if(box.style.display==="none"){
+    box.style.display="block";
+    box.innerHTML="";
+    const input = document.createElement("input"); input.placeholder="Add comment";
+    const postBtn = document.createElement("button"); postBtn.innerText="Post";
+    postBtn.onclick = async ()=>{
+      const commentText = input.value.trim();
+      if(!commentText) return;
+      const comments = docData.comments || [];
+      comments.push({user:currentUser,text:commentText});
+      await updateDoc(snap.docs[0].ref,{comments});
+      loadFeed();
+    };
+    box.appendChild(input); box.appendChild(postBtn);
+    docData.comments.forEach(c=>{
       const cDiv = document.createElement("div");
-      cDiv.innerHTML=`<b style="cursor:pointer;color:#065fd4;" onclick="viewProfile('${c.user}')">${c.user}</b>: ${c.text}`;
+      cDiv.innerHTML = `<b style="color:#065fd4;cursor:pointer;" onclick="viewProfile('${c.user}')">${c.user}</b>: ${c.text}`;
       box.appendChild(cDiv);
     });
-  });
+    btn.innerText="Close comments";
+  }else{
+    box.style.display="none";
+    btn.innerText=`View comments (${docData.comments.length})`;
+  }
 }
 
-/* Toggle comments */
-window.toggleComments=id=>{
-  const box=$("comments-"+id);
-  const btn=$("toggleBtn-"+id);
-  if(box.style.display==="none"){box.style.display="block"; btn.innerText="Close comments";}
-  else{box.style.display="none"; btn.innerText=`View comments`;}
-};
-
-/* Likes */
-window.toggleLike=async id=>{
-  const videoRef = doc(db,"videos",id);
-  const snap = await getDoc(videoRef);
-  const v = snap.data();
-  const username = currentUser.email.split("@")[0];
-  if(v.likes.includes(username)) v.likes = v.likes.filter(u=>u!==username);
-  else v.likes.push(username);
-  await setDoc(videoRef,v);
-};
-
-/* Profiles */
-window.viewProfile=user=>{
-  feed.style.display="none"; profilePage.style.display="block";
-  profileTitle.innerText=user+"'s Channel"; profileAvatar.src=getDefaultAvatar(user,64);
-  profileVideos.innerHTML="";
-  const q = query(collection(db,"videos"),orderBy("timestamp","desc"));
-  onSnapshot(q,snap=>{
-    profileVideos.innerHTML="";
-    snap.forEach(doc=>{
-      const v = doc.data();
-      if(v.user===user){
-        const vid=document.createElement("video"); vid.src=v.data; vid.controls=true; vid.width=320;
-        profileVideos.appendChild(vid);
-      }
-    });
+/* ===== PROFILE ===== */
+async function viewProfile(username){
+  $("app").style.display="none";
+  $("profilePage").style.display="block";
+  $("profileTitle").innerText = username+"'s Channel";
+  $("profileAvatar").src = ""; // optional avatar
+  $("profileVideos").innerHTML="";
+  const q = query(collection(db,"videos"),where("user","==",username),orderBy("timestamp","desc"));
+  const snap = await getDocs(q);
+  snap.forEach(d=>{
+    const v = d.data();
+    const vid = document.createElement("video"); vid.src=v.url; vid.controls=true; vid.width=320;
+    $("profileVideos").appendChild(vid);
   });
-};
+}
+function closeProfile(){
+  $("profilePage").style.display="none";
+  $("app").style.display="block";
+}
 
-/* Buttons */
-myChannelBtn.onclick = ()=>viewProfile(currentUser.email.split("@")[0]);
-backBtn.onclick = ()=>{profilePage.style.display="none"; feed.style.display="block";};
-deleteAccountBtn.onclick = async ()=>{
-  if(!confirm("Delete account permanently?")) return;
-  const q = query(collection(db,"videos"));
-  onSnapshot(q,snap=>{ snap.forEach(doc=>{ if(doc.data().user===currentUser.email.split("@")[0]) deleteDoc(doc.ref); }); });
-  await deleteUser(currentUser); signOut(auth);
-};
+/* ===== BUTTON EVENTS ===== */
+$("signupBtn").onclick=signup;
+$("loginBtn").onclick=login;
+$("logoutBtn").onclick=logout;
+$("uploadBtn").onclick=addVideo;
+$("myChannelBtn").onclick=()=>viewProfile(currentUser);
+$("backBtn").onclick=closeProfile;
 
+/* ===== AUTH STATE ===== */
+onAuthStateChanged(auth,user=>{
+  if(user){
+    currentUser = user.email.split("@")[0];
+    $("loginBox").style.display="none";
+    $("app").style.display="block";
+    $("status").innerText="Logged in as: "+currentUser;
+    loadFeed();
+  }else{
+    currentUser=null;
+    $("loginBox").style.display="block";
+    $("app").style.display="none";
+  }
+});
 </script>
 </body>
 </html>
-
