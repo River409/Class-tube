@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>ClassTube</title>
+
+<style>
+
+body{
+font-family:Arial;
+margin:0;
+background:white;
+}
+
+header{
+background:#ddd;
+padding:12px;
+text-align:center;
+font-size:22px;
+font-weight:bold;
+}
+
+main{
+width:650px;
+margin:auto;
+}
+
+button,input{
+width:100%;
+padding:8px;
+margin:6px 0;
+}
+
+.video-card{
+border-bottom:1px solid #ccc;
+margin-bottom:20px;
+padding-bottom:10px;
+}
+
+video{
+width:100%;
+}
+
+.channel{
+cursor:pointer;
+color:blue;
+margin-top:5px;
+}
+
+.avatar{
+width:32px;
+height:32px;
+border-radius:50%;
+display:inline-flex;
+align-items:center;
+justify-content:center;
+color:white;
+margin-right:6px;
+}
+
+#userBox{
+text-align:center;
+margin:10px;
+}
+
+</style>
+</head>
+
+<body>
+
+<header>ClassTube 🌍</header>
+
+<div id="userBox">
+<button id="loginBtn">Login with Google</button>
+<button id="logoutBtn" style="display:none;">Logout</button>
+<p id="userInfo"></p>
+</div>
+
+<main>
+
+<input id="title" placeholder="Video title">
+<input type="file" id="videoFile" accept="video/*">
+<button onclick="uploadVideo()">Upload Video</button>
+
+<div id="videos"></div>
+
+</main>
+
+
+<script type="module">
+
+/* ================= FIREBASE IMPORTS ================= */
+
+import { initializeApp }
+from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+
+import {
+getFirestore,
+collection,
+addDoc,
+query,
+orderBy,
+onSnapshot,
+doc,
+setDoc,
+where
+}
+from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+import {
+getStorage,
+ref,
+uploadBytes,
+getDownloadURL
+}
+from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
+
+import {
+getAuth,
+GoogleAuthProvider,
+signInWithPopup,
+signOut,
+onAuthStateChanged
+}
+from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+
+/* =====================================================
+   🔥 PASTE YOUR FIREBASE CONFIG HERE
+===================================================== */
+
+const firebaseConfig = {
+
+apiKey: "PASTE_API_KEY",
+authDomain: "PASTE_AUTH_DOMAIN",
+projectId: "PASTE_PROJECT_ID",
+storageBucket: "PASTE_STORAGE_BUCKET",
+appId: "PASTE_APP_ID"
+
+};
+
+/* ===================================================== */
+
+
+const app = initializeApp(firebaseConfig);
+
+const db = getFirestore(app);
+const storage = getStorage(app);
+const auth = getAuth(app);
+
+const provider = new GoogleAuthProvider();
+
+let currentUser=null;
+
+const videosDiv=document.getElementById("videos");
+
+
+/* ================= LOGIN ================= */
+
+loginBtn.onclick=()=>{
+signInWithPopup(auth,provider);
+};
+
+logoutBtn.onclick=()=>{
+signOut(auth);
+};
+
+
+onAuthStateChanged(auth,async(user)=>{
+
+if(user){
+
+currentUser=user;
+
+userInfo.innerText=
+"Logged in as "+user.displayName;
+
+loginBtn.style.display="none";
+logoutBtn.style.display="block";
+
+/* create global channel */
+await setDoc(
+doc(db,"channels",user.uid),
+{
+uid:user.uid,
+name:user.displayName,
+photo:user.photoURL
+},
+{merge:true}
+);
+
+loadGlobal();
+
+}else{
+
+currentUser=null;
+userInfo.innerText="";
+loginBtn.style.display="block";
+logoutBtn.style.display="none";
+
+}
+
+});
+
+
+/* ================= UPLOAD VIDEO ================= */
+
+window.uploadVideo=async function(){
+
+if(!currentUser){
+alert("Login first");
+return;
+}
+
+const file=
+document.getElementById("videoFile").files[0];
+
+const title=
+document.getElementById("title").value;
+
+if(!file||!title){
+alert("Missing info");
+return;
+}
+
+const storageRef=
+ref(storage,
+"videos/"+Date.now()+"_"+file.name);
+
+await uploadBytes(storageRef,file);
+
+const url=
+await getDownloadURL(storageRef);
+
+await addDoc(collection(db,"videos"),{
+
+title,
+video_url:url,
+
+uid:currentUser.uid,
+username:currentUser.displayName,
+photo:currentUser.photoURL,
+
+created_at:Date.now()
+
+});
+
+};
+
+
+/* ================= GLOBAL FEED ================= */
+
+window.loadGlobal=function(){
+
+const q=query(
+collection(db,"videos"),
+orderBy("created_at","desc")
+);
+
+onSnapshot(q,(snapshot)=>{
+
+videosDiv.innerHTML="";
+
+snapshot.forEach(docSnap=>{
+
+const v=docSnap.data();
+
+videosDiv.innerHTML+=`
+
+<div class="video-card">
+
+<video controls>
+<source src="${v.video_url}">
+</video>
+
+<b>${v.title}</b>
+
+<div class="channel"
+onclick="openChannel('${v.uid}')">
+
+<img src="${v.photo}"
+width="30"
+style="border-radius:50%;
+vertical-align:middle">
+
+${v.username}
+
+</div>
+
+</div>
+`;
+
+});
+
+});
+
+};
+
+
+/* ================= CHANNEL PAGE ================= */
+
+window.openChannel=function(uid){
+
+const q=query(
+collection(db,"videos"),
+where("uid","==",uid),
+orderBy("created_at","desc")
+);
+
+onSnapshot(q,(snapshot)=>{
+
+videosDiv.innerHTML=
+`<button onclick="loadGlobal()">⬅ Back</button>`;
+
+snapshot.forEach(docSnap=>{
+
+const v=docSnap.data();
+
+videosDiv.innerHTML+=`
+
+<div class="video-card">
+
+<video controls>
+<source src="${v.video_url}">
+</video>
+
+<b>${v.title}</b>
+
+</div>
+`;
+
+});
+
+});
+
+};
+
+</script>
+
+</body>
+</html>
